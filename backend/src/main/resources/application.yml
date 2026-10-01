@@ -1,0 +1,87 @@
+spring:
+  application:
+    name: cloudflow-backend
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/cloudflow}
+    username: ${DATABASE_USERNAME:cloudflow}
+    password: ${DATABASE_PASSWORD:cloudflow}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  security:
+    oauth2:
+      client:
+        registration:
+          github:
+            client-id: ${GITHUB_CLIENT_ID}
+            client-secret: ${GITHUB_CLIENT_SECRET}
+            # repo + workflow are needed to read private repositories and commit CI workflows.
+            scope: read:user,user:email,repo,workflow
+
+cloudflow:
+  web:
+    frontend-url: ${FRONTEND_URL:http://localhost:3000}
+    cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:${FRONTEND_URL:http://localhost:3000}}
+  crypto:
+    encryption-key: ${CLOUDFLOW_ENCRYPTION_KEY}
+  auth:
+    jwt-secret: ${CLOUDFLOW_JWT_SECRET}
+    jwt-issuer: cloudflow
+    access-token-ttl: 15m
+    refresh-token-ttl: 7d
+    refresh-cookie-name: cloudflow_refresh
+    refresh-cookie-secure: ${CLOUDFLOW_COOKIE_SECURE:false}
+  deployment:
+    docker-host: ${DOCKER_HOST:unix:///var/run/docker.sock}
+    registry: ${CLOUDFLOW_REGISTRY:localhost:5000}
+    work-directory: ${CLOUDFLOW_WORK_DIRECTORY:${java.io.tmpdir}/cloudflow-builds}
+    health-check-host: ${CLOUDFLOW_HEALTH_CHECK_HOST:}
+    public-host: ${CLOUDFLOW_PUBLIC_HOST:localhost}
+  monitoring:
+    interval: ${CLOUDFLOW_MONITORING_INTERVAL:15s}
+  ai:
+    base-url: ${CLOUDFLOW_AI_BASE_URL:http://localhost:8000}
+    internal-token: ${CLOUDFLOW_AI_INTERNAL_TOKEN:}
+  cicd:
+    public-api-url: ${CLOUDFLOW_PUBLIC_API_URL:http://localhost:8080}
+    webhook-secret: ${CLOUDFLOW_GITHUB_WEBHOOK_SECRET:}
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  error:
+    include-stacktrace: never
+    include-message: never
+
+management:
+  # Actuator runs on a separate internal port (not published outside the platform network), so
+  # Prometheus metrics are never reachable on the public API port.
+  server:
+    port: ${MANAGEMENT_PORT:8081}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  info:
+    env:
+      enabled: false
+
+logging:
+  level:
+    root: INFO
+    com.cloudflow: ${CLOUDFLOW_LOG_LEVEL:INFO}

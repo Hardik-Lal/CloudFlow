@@ -1,0 +1,48 @@
+name: AI Service CI
+
+on:
+  push:
+    branches: [main]
+    paths: ["ai-service/**", ".github/workflows/ai-service.yml"]
+  pull_request:
+    paths: ["ai-service/**", ".github/workflows/ai-service.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: ai-service
+
+jobs:
+  build:
+    name: Lint and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          cache-dependency-glob: ai-service/uv.lock
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -W error
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: ai-service
+          push: false
+          cache-from: type=gha,scope=ai-service
+          cache-to: type=gha,mode=max,scope=ai-service

@@ -1,0 +1,6 @@
+# Images are tagged localhost:5000/... by the deployment engine (the registry as the host Docker
+# daemon sees it). Inside the cluster that name is resolved to the Compose registry service.
+mirrors:
+  "localhost:5000":
+    endpoint:
+      - "http://registry:5000"

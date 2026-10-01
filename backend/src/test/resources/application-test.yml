@@ -1,0 +1,30 @@
+# Test-only values. Never use these outside tests.
+management:
+  server:
+    # Same port as the application so MockMvc can reach actuator endpoints.
+    port:
+
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          github:
+            client-id: test-client-id
+            client-secret: test-client-secret
+
+cloudflow:
+  crypto:
+    encryption-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+  auth:
+    jwt-secret: test-jwt-secret-that-is-at-least-32-characters-long
+  deployment:
+    health-check-interval: 10ms
+    health-check-timeout: 1s
+    push-images: true
+  cicd:
+    public-api-url: https://cloudflow.example.test
+    webhook-secret: test-webhook-secret
+  monitoring:
+    # Tests call the collector directly instead of waiting for the schedule.
+    initial-delay: 1h

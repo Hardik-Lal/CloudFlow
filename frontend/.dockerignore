@@ -1,0 +1,9 @@
+node_modules
+.next
+.env*
+!.env.example
+Dockerfile
+e2e
+playwright.config.ts
+test-results
+playwright-report

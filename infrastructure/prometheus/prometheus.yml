@@ -1,0 +1,12 @@
+# Prometheus scrapes the backend's internal management port (not reachable from outside the
+# platform network). Application metrics are named cloudflow_app_* and tagged with
+# project, environment, and environment_id.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: cloudflow-backend
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["backend:8081"]

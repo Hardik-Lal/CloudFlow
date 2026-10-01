@@ -1,0 +1,36 @@
+name: Infrastructure CI
+
+on:
+  push:
+    branches: [main]
+    paths: ["infrastructure/**", ".github/workflows/infrastructure.yml"]
+  pull_request:
+    paths: ["infrastructure/**", ".github/workflows/infrastructure.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  compose:
+    name: Validate Docker Compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate compose file
+        working-directory: infrastructure
+        run: |
+          cp .env.example .env
+          # Required secrets are empty in the example; fill them with dummies for validation only.
+          sed -i -E 's/^(GITHUB_CLIENT_ID|GITHUB_CLIENT_SECRET|CLOUDFLOW_JWT_SECRET|CLOUDFLOW_ENCRYPTION_KEY|CLOUDFLOW_AI_INTERNAL_TOKEN)=$/\1=ci-placeholder/' .env
+          docker compose config --quiet
+          docker compose --profile kubernetes --profile grafana config --quiet
+
+      - name: Validate production overrides
+        working-directory: infrastructure
+        env:
+          CLOUDFLOW_DATABASE_URL: jdbc:postgresql://db.example.internal:5432/cloudflow
+          CLOUDFLOW_DATABASE_USERNAME: ci-placeholder
+          CLOUDFLOW_DATABASE_PASSWORD: ci-placeholder
+          CLOUDFLOW_AI_DATABASE_URL: postgresql://ci:ci@db.example.internal:5432/cloudflow
+          PUBLIC_API_BASE_URL: https://api.example.com
+        run: docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet

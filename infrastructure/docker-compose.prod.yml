@@ -1,0 +1,50 @@
+# Production overrides (Phase 10) for a single Docker host such as an AWS EC2 instance:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# - PostgreSQL is a managed database (Amazon RDS for PostgreSQL with the pgvector extension).
+# - Artifacts go to an S3 bucket; credentials come from the EC2 instance role.
+# - TLS terminates at the load balancer (ALB with an ACM certificate), which forwards to the
+#   frontend (3000) and API (8080) ports. Nothing else is published.
+#
+# Start the bundled database or object store only when you are not using the managed services:
+#   --profile bundled-database / --profile bundled-storage
+# See docs/deployment.md, section "Production deployment on AWS".
+
+services:
+  postgres:
+    profiles: [bundled-database]
+    ports: !reset []
+
+  object-storage:
+    profiles: [bundled-storage]
+
+  backend:
+    depends_on: !override
+      registry:
+        condition: service_started
+    environment:
+      DATABASE_URL: ${CLOUDFLOW_DATABASE_URL:?CLOUDFLOW_DATABASE_URL must be set (jdbc:postgresql://<rds-endpoint>:5432/cloudflow?sslmode=require)}
+      DATABASE_USERNAME: ${CLOUDFLOW_DATABASE_USERNAME:?CLOUDFLOW_DATABASE_USERNAME must be set}
+      DATABASE_PASSWORD: ${CLOUDFLOW_DATABASE_PASSWORD:?CLOUDFLOW_DATABASE_PASSWORD must be set}
+      # The refresh cookie is only sent over HTTPS.
+      CLOUDFLOW_COOKIE_SECURE: "true"
+      # AWS S3: no custom endpoint, virtual-hosted bucket addressing, instance-role credentials.
+      CLOUDFLOW_STORAGE_ENDPOINT: ${CLOUDFLOW_S3_ENDPOINT:-}
+      CLOUDFLOW_STORAGE_PATHSTYLEACCESS: ${CLOUDFLOW_S3_PATH_STYLE:-false}
+      CLOUDFLOW_STORAGE_ACCESSKEY: ""
+      CLOUDFLOW_STORAGE_SECRETKEY: ""
+    ports: !override
+      - "${BACKEND_PORT:-8080}:8080"
+
+  ai-service:
+    depends_on: !reset {}
+    environment:
+      AI_SERVICE_ENVIRONMENT: production
+      AI_SERVICE_DATABASE_URL: ${CLOUDFLOW_AI_DATABASE_URL:?CLOUDFLOW_AI_DATABASE_URL must be set (postgresql://<user>:<password>@<rds-endpoint>:5432/cloudflow?sslmode=require)}
+
+  frontend:
+    build:
+      args:
+        # Public HTTPS URL of the API behind the load balancer, e.g. https://api.cloudflow.example.com
+        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:?PUBLIC_API_BASE_URL must be set}

@@ -1,0 +1,82 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.1'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'com.diffplug.spotless' version '8.10.2'
+}
+
+group = 'com.cloudflow'
+version = '0.1.0-SNAPSHOT'
+description = 'CloudFlow platform backend (modular monolith)'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    implementation 'org.springframework.boot:spring-boot-starter-restclient'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    implementation 'org.flywaydb:flyway-database-postgresql'
+    implementation 'com.github.docker-java:docker-java-core:3.7.1'
+    implementation 'com.github.docker-java:docker-java-transport-httpclient5:3.7.1'
+    implementation 'org.apache.commons:commons-compress:1.28.0'
+    // Phase 10: Kubernetes deployment target (JDK HTTP client instead of the default Vert.x one).
+    implementation('io.fabric8:kubernetes-client:8.0.0') {
+        exclude group: 'io.fabric8', module: 'kubernetes-httpclient-vertx-5'
+    }
+    runtimeOnly 'io.fabric8:kubernetes-httpclient-jdk:8.0.0'
+    // Phase 10: artifact storage in S3 (synchronous client only).
+    implementation platform('software.amazon.awssdk:bom:2.55.6')
+    implementation('software.amazon.awssdk:s3') {
+        exclude group: 'software.amazon.awssdk', module: 'netty-nio-client'
+    }
+    runtimeOnly 'org.postgresql:postgresql'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-restclient-test'
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+    testImplementation 'org.testcontainers:testcontainers-postgresql'
+    testImplementation 'org.testcontainers:testcontainers-k3s'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs += ['-parameters', '-Xlint:all,-serial', '-Werror']
+    options.encoding = 'UTF-8'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    testLogging {
+        events 'failed', 'skipped'
+        exceptionFormat 'full'
+    }
+}
+
+spotless {
+    java {
+        target 'src/**/*.java'
+        googleJavaFormat('1.36.1')
+        removeUnusedImports()
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+}

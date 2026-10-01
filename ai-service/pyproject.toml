@@ -1,0 +1,37 @@
+[project]
+name = "cloudflow-ai-service"
+version = "0.1.0"
+description = "CloudFlow AI and RAG service"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.141.1",
+    "numpy>=2.5.3",
+    "openai>=3.19.2",
+    "pgvector>=0.5.0",
+    "psycopg[binary,pool]>=3.3.6",
+    "pydantic-settings>=2.15.0",
+    "uvicorn[standard]>=0.53.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.13.1",
+    "pytest>=9.1.1",
+    "ruff>=0.16.8",
+    "testcontainers[postgres]>=4.15.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "S", "A", "C4", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
