@@ -14,7 +14,9 @@ import com.cloudflow.github.client.GithubModels.WorkflowJob;
 import com.cloudflow.github.client.GithubModels.WorkflowJobs;
 import com.cloudflow.github.client.GithubModels.WorkflowRun;
 import com.cloudflow.github.client.GithubModels.WorkflowRuns;
+import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,6 +34,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClient.RequestHeadersSpec.ConvertibleClientHttpResponse;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
@@ -172,31 +175,56 @@ public class GithubClient {
 
   /**
    * Streams the repository contents at {@code sha} as a gzipped tarball into {@code target}. GitHub
-   * redirects to a pre-signed download URL, which the HTTP client follows.
+   * answers with a redirect to a pre-signed codeload.github.com URL. The HTTP client does not
+   * follow a cross-host redirect for a request carrying credentials, so it is followed here
+   * explicitly, without the token: the pre-signed URL authorizes itself.
    */
   public void downloadTarball(String token, String owner, String repo, String sha, Path target) {
     call(
-        () ->
+        () -> {
+          URI location =
+              restClient
+                  .get()
+                  .uri("/repos/{owner}/{repo}/tarball/{sha}", owner, repo, sha)
+                  .headers(headers -> headers.setBearerAuth(token))
+                  .exchange(
+                      (request, response) -> {
+                        if (response.getStatusCode().is3xxRedirection()
+                            && response.getHeaders().getLocation() != null) {
+                          return response.getHeaders().getLocation();
+                        }
+                        saveTarball(response, target);
+                        return null;
+                      });
+          if (location != null) {
             restClient
                 .get()
-                .uri("/repos/{owner}/{repo}/tarball/{sha}", owner, repo, sha)
-                .headers(headers -> headers.setBearerAuth(token))
+                .uri(location)
                 .exchange(
                     (request, response) -> {
-                      if (response.getStatusCode().isError()) {
-                        throw new RestClientResponseException(
-                            "Tarball download failed",
-                            response.getStatusCode(),
-                            response.getStatusText(),
-                            response.getHeaders(),
-                            null,
-                            null);
-                      }
-                      try (InputStream body = response.getBody()) {
-                        return Files.copy(body, target, StandardCopyOption.REPLACE_EXISTING);
-                      }
-                    }),
+                      saveTarball(response, target);
+                      return null;
+                    });
+          }
+          return target;
+        },
         owner + "/" + repo + "@" + sha);
+  }
+
+  private static void saveTarball(ConvertibleClientHttpResponse response, Path target)
+      throws IOException {
+    if (!response.getStatusCode().is2xxSuccessful()) {
+      throw new RestClientResponseException(
+          "Tarball download failed",
+          response.getStatusCode(),
+          response.getStatusText(),
+          response.getHeaders(),
+          null,
+          null);
+    }
+    try (InputStream body = response.getBody()) {
+      Files.copy(body, target, StandardCopyOption.REPLACE_EXISTING);
+    }
   }
 
   /**

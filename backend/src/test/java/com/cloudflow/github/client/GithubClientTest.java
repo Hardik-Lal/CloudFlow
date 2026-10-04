@@ -3,15 +3,20 @@ package com.cloudflow.github.client;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.cloudflow.common.exception.ExternalServiceException;
 import com.cloudflow.common.exception.ResourceNotFoundException;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -119,5 +124,25 @@ class GithubClientTest {
     assertThatThrownBy(() -> client.getRepository("revoked", "octo", "demo"))
         .isInstanceOf(ExternalServiceException.class)
         .hasMessageContaining("sign in with GitHub again");
+  }
+
+  @Test
+  void followsTarballRedirectWithoutSendingTheToken(@TempDir Path directory) throws Exception {
+    String download = "https://codeload.github.test/octo/demo/legacy.tar.gz/abc123?token=signed";
+    byte[] tarball = {0x1f, (byte) 0x8b, 1, 2, 3};
+    server
+        .expect(requestTo("https://api.github.test/repos/octo/demo/tarball/abc123"))
+        .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer user-token"))
+        .andRespond(withStatus(HttpStatus.FOUND).location(URI.create(download)));
+    server
+        .expect(requestTo(download))
+        .andExpect(headerDoesNotExist(HttpHeaders.AUTHORIZATION))
+        .andRespond(withSuccess(tarball, MediaType.APPLICATION_OCTET_STREAM));
+    Path target = directory.resolve("source.tar.gz");
+
+    client.downloadTarball("user-token", "octo", "demo", "abc123", target);
+
+    assertThat(Files.readAllBytes(target)).isEqualTo(tarball);
+    server.verify();
   }
 }
