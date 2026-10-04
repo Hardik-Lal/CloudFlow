@@ -160,3 +160,346 @@ place for the access policy. The database stores only each member's role (`organ
   FastAPI / OpenAI API / pgvector, Docker / Docker Compose, GitHub Actions.
 - The backend is a **modular monolith**. The AI service is the only separate service.
 - The first deployment target is Docker. Kubernetes is the second target (Phase 10), chosen per environment.
+
+## 6. Diagrams
+
+### 6.1 System architecture
+
+CloudFlow runs as a set of containers started by Docker Compose. The browser only talks to the
+frontend and the backend's public API. Everything else stays on internal networks.
+
+```mermaid
+flowchart LR
+    dev([Developer<br/>browser])
+
+    subgraph platform["CloudFlow platform (Docker Compose)"]
+        fe["Frontend<br/>Next.js · TypeScript"]
+        be["Backend · Spring Boot<br/>(modular monolith)<br/>auth · projects · environments<br/>deployments · CI/CD · monitoring<br/>logs · assistant client · audit"]
+        ai["AI service<br/>Python · FastAPI"]
+        db[("PostgreSQL<br/>+ pgvector")]
+        reg[("Image registry")]
+        s3[("Object storage<br/>S3 API")]
+        prom["Prometheus"]
+    end
+
+    subgraph targets["Deployment targets"]
+        docker["Docker Engine"]
+        k8s["Kubernetes (k3s / EKS)"]
+        apps["User applications<br/>(containers / pods)"]
+    end
+
+    subgraph external["External services"]
+        gh["GitHub<br/>OAuth · REST API · Actions"]
+        oai["OpenAI API"]
+    end
+
+    dev -->|HTTPS| fe
+    dev -->|REST + WebSocket| be
+    fe -->|REST /api/v1| be
+    be --> db
+    be -->|push images| reg
+    be -->|artifacts, archived logs| s3
+    be -->|build, run, inspect| docker
+    be -->|deployments, services| k8s
+    docker --> apps
+    k8s --> apps
+    k8s -->|pull images| reg
+    be <-->|OAuth, repos, workflows, webhooks| gh
+    be -->|internal HTTP| ai
+    ai --> db
+    ai --> oai
+    prom -->|scrape /actuator/prometheus| be
+```
+
+### 6.2 Use case diagram
+
+Roles are cumulative: a Developer can do everything a Viewer can, an Admin everything a Developer
+can, and an Owner everything an Admin can (see the matrix in §4).
+
+```mermaid
+flowchart LR
+    viewer(["👤 Viewer"])
+    developer(["👤 Developer"])
+    admin(["👤 Admin"])
+    owner(["👤 Owner"])
+
+    developer -.->|inherits| viewer
+    admin -.->|inherits| developer
+    owner -.->|inherits| admin
+
+    subgraph system["CloudFlow"]
+        uc1(["UC-1 Sign in with GitHub"])
+        uc2(["UC-2 View projects, deployments,<br/>logs and metrics"])
+        uc3(["UC-3 Ask the AI assistant /<br/>explain a failed deployment"])
+        uc4(["UC-4 Create project from<br/>a GitHub repository"])
+        uc5(["UC-5 Manage environments,<br/>variables and secrets"])
+        uc6(["UC-6 Deploy / roll back<br/>(non-production)"])
+        uc7(["UC-7 Generate and commit<br/>CI/CD workflow"])
+        uc8(["UC-8 Approve AI-generated changes"])
+        uc9(["UC-9 Manage production<br/>config and deployments"])
+        uc10(["UC-10 Manage members and roles"])
+        uc11(["UC-11 View audit log"])
+        uc12(["UC-12 Delete organization"])
+    end
+
+    github(["⚙ GitHub"])
+    docker(["⚙ Docker / Kubernetes"])
+    openai(["⚙ OpenAI API"])
+
+    viewer --- uc1
+    viewer --- uc2
+    viewer --- uc3
+    developer --- uc4
+    developer --- uc5
+    developer --- uc6
+    developer --- uc7
+    developer --- uc8
+    admin --- uc9
+    admin --- uc10
+    admin --- uc11
+    owner --- uc12
+
+    uc1 --- github
+    uc4 --- github
+    uc7 --- github
+    uc6 --- docker
+    uc9 --- docker
+    uc3 --- openai
+```
+
+### 6.3 ER diagram
+
+Every table in the platform database. Only keys and the most important columns are shown. The full
+column lists are in [database.md](database.md). The `ai` schema belongs to the AI service. It refers
+to projects, environments, and deployments by id only, without foreign keys, so the two services stay
+independent (dashed line).
+
+```mermaid
+erDiagram
+    users ||--o| user_github_credentials : has
+    users ||--o{ refresh_tokens : owns
+    users ||--o{ organization_memberships : "is member"
+    organizations ||--o{ organization_memberships : has
+    organizations ||--o{ projects : owns
+    organizations ||--o{ audit_logs : records
+    projects ||--|| repositories : "linked to"
+    repositories ||--o{ branches : has
+    projects ||--o{ environments : has
+    environments ||--o{ environment_variables : has
+    environments ||--|| deployment_configs : "configured by"
+    environments ||--o{ deploy_tokens : "authorizes CI with"
+    environments ||--o{ deployments : receives
+    deployments ||--o{ deployment_logs : produces
+    deployments |o--o| deployments : "rollback of"
+    environments ||--o{ health_check_results : probed
+    environments ||--o{ environment_events : records
+    deployments |o--o{ environment_events : "caused by"
+    projects ||--o{ pipelines : has
+    pipelines ||--o{ pipeline_runs : executes
+    pipeline_runs ||--o{ pipeline_run_jobs : contains
+    projects ||--o{ ai_suggestions : receives
+    projects ||--o{ artifacts : stores
+    projects ||..o{ ai_documents : "indexed as"
+    ai_documents ||--o{ ai_chunks : "split into"
+
+    users {
+        uuid id PK
+        bigint github_id UK
+        varchar username
+    }
+    user_github_credentials {
+        uuid user_id PK,FK
+        text access_token_encrypted
+    }
+    refresh_tokens {
+        uuid id PK
+        uuid user_id FK
+        varchar token_hash UK
+    }
+    organizations {
+        uuid id PK
+        varchar slug UK
+    }
+    organization_memberships {
+        uuid id PK
+        uuid organization_id FK
+        uuid user_id FK
+        varchar role
+    }
+    projects {
+        uuid id PK
+        uuid organization_id FK
+        varchar app_type
+    }
+    repositories {
+        uuid id PK
+        uuid project_id FK,UK
+        varchar full_name
+    }
+    branches {
+        uuid id PK
+        uuid repository_id FK
+        varchar head_commit_sha
+    }
+    environments {
+        uuid id PK
+        uuid project_id FK
+        varchar type
+        varchar branch
+    }
+    environment_variables {
+        uuid id PK
+        uuid environment_id FK
+        varchar key
+        boolean secret
+    }
+    deployment_configs {
+        uuid environment_id PK,FK
+        varchar template
+        int container_port
+        varchar target
+    }
+    deploy_tokens {
+        uuid id PK
+        uuid environment_id FK
+        varchar token_hash UK
+    }
+    deployments {
+        uuid id PK
+        uuid environment_id FK
+        varchar status
+        varchar image_tag
+        uuid rollback_of_id FK
+    }
+    deployment_logs {
+        bigint id PK
+        uuid deployment_id FK
+        varchar phase
+    }
+    health_check_results {
+        bigint id PK
+        uuid environment_id FK
+        uuid deployment_id FK
+        boolean healthy
+    }
+    environment_events {
+        bigint id PK
+        uuid environment_id FK
+        uuid deployment_id FK
+        varchar severity
+    }
+    pipelines {
+        uuid id PK
+        uuid project_id FK
+        varchar workflow_path
+    }
+    pipeline_runs {
+        uuid id PK
+        uuid pipeline_id FK
+        bigint github_run_id UK
+    }
+    pipeline_run_jobs {
+        uuid id PK
+        uuid run_id FK
+        bigint github_job_id UK
+    }
+    ai_suggestions {
+        uuid id PK
+        uuid project_id FK
+        varchar status
+    }
+    artifacts {
+        uuid id PK
+        uuid project_id FK
+        varchar storage_key UK
+    }
+    audit_logs {
+        bigint id PK
+        uuid organization_id FK
+        uuid actor_id FK
+        varchar action
+    }
+    ai_documents {
+        uuid id PK
+        uuid project_id
+        varchar source_ref
+        char content_hash
+    }
+    ai_chunks {
+        bigint id PK
+        uuid document_id FK
+        vector embedding "1536-d"
+    }
+```
+
+### 6.4 Interface diagram
+
+The external interfaces of each CloudFlow component: what talks to what, over which protocol.
+
+```mermaid
+flowchart LR
+    user(["Developer<br/>(web browser)"])
+    gha(["GitHub Actions<br/>runners"])
+
+    subgraph ui["User interface"]
+        fe["Frontend · Next.js<br/>:3000"]
+    end
+
+    subgraph core["Backend · Spring Boot"]
+        rest["REST API<br/>/api/v1/** · JSON · JWT bearer"]
+        ws["WebSocket (STOMP)<br/>/ws · subscribe /topic/**"]
+        hooks["Inbound hooks<br/>/api/v1/webhooks/github (HMAC)<br/>/api/v1/pipeline-hooks (deploy token)"]
+        mgmt["Management port :8081<br/>/actuator/health<br/>/actuator/prometheus"]
+    end
+
+    subgraph aisvc["AI service · FastAPI :8000"]
+        aiapi["Internal HTTP API<br/>JSON · X-Internal-Token"]
+    end
+
+    subgraph infra["Internal infrastructure"]
+        pg[("PostgreSQL :5432")]
+        dockerapi["Docker Engine API<br/>unix socket"]
+        k8sapi["Kubernetes API<br/>HTTPS :6443"]
+        regapi["Image registry<br/>OCI API :5000"]
+        s3api["Object storage<br/>S3 API"]
+        prom["Prometheus"]
+    end
+
+    subgraph ext["External services"]
+        ghapi["GitHub<br/>OAuth 2.0 · REST API v3"]
+        oaiapi["OpenAI API<br/>chat + embeddings"]
+    end
+
+    user -->|HTTPS| fe
+    user -->|live logs, status| ws
+    fe -->|fetch, cookies| rest
+    gha -->|deploy stage| hooks
+    ghapi -->|webhook events| hooks
+    rest -->|OAuth, repos, workflows| ghapi
+    rest -->|HTTP| aiapi
+    rest --> pg
+    rest --> dockerapi
+    rest --> k8sapi
+    rest --> regapi
+    rest --> s3api
+    aiapi --> pg
+    aiapi -->|HTTPS| oaiapi
+    prom -->|scrape every 15 s| mgmt
+```
+
+| Interface | Type | Protocol / format | Authentication |
+| --- | --- | --- | --- |
+| Web UI | User interface | HTTPS, HTML/JS (Next.js) | GitHub sign-in, HttpOnly refresh cookie |
+| Platform API | Software, inbound | REST over HTTPS, JSON, `/api/v1` | JWT access token (15 min) |
+| Live updates | Communication | WebSocket with STOMP, `/ws`, topics under `/topic` | JWT on connect |
+| GitHub webhooks | Software, inbound | HTTPS POST, JSON | HMAC signature |
+| CI/CD deploy hook | Software, inbound | HTTPS POST from GitHub Actions | Per-environment deploy token |
+| GitHub | Software, outbound | OAuth 2.0, REST API v3 | User's encrypted OAuth token |
+| AI service | Software, internal | HTTP, JSON | Shared `X-Internal-Token` |
+| OpenAI | Software, outbound | HTTPS, JSON | API key (AI service only) |
+| Docker Engine | Software, internal | Docker Engine API over a Unix socket | Socket access |
+| Kubernetes | Software, outbound | Kubernetes API over HTTPS | kubeconfig |
+| Image registry | Software, internal | OCI distribution API | Internal network |
+| Object storage | Software, internal | S3 API | Access key and secret |
+| PostgreSQL | Software, internal | PostgreSQL wire protocol | Username and password |
+| Metrics | Software, internal | Prometheus text format, `/actuator/prometheus` | Internal port only |
